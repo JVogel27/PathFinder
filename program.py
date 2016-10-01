@@ -42,8 +42,6 @@ def main():
 			resultsMap = Image.open("terrain.png")
 			for control in controls:
 				time, parents = findPath(pixelMap, elevationMap, start, control)  # return parents
-				#time = results[0]
-				#parents = results[1]
 				generatePath(resultsMap, control, parents)
 				totalTime += time
 				start = control
@@ -52,44 +50,53 @@ def main():
 			allowedTime = int(pathFile.readline().strip())
 			array = pathFile.readline().split()
 			startFinish = (int(array[0]), int(array[1]))
+
 			controls = []
 			for line in pathFile:
 				lineArray = line.split()
 				controls.append((int(lineArray[0]), int(lineArray[1])))
-			controls.append(startFinish)
-			allOptions = permutations(controls)
-			bestPath = (0, allowedTime, {})
-			#allOptions = list(allOptions)
-			for option in allOptions:
-				option = list(option)
-				if (option[0][0], option[0][1]) == startFinish:
+			c = controls[:]
+			graph = createGraph(startFinish, c, pixelMap, elevationMap)   # initialize graph
+
+			result = scoreo(graph, controls, allowedTime, startFinish)
+
+
+def scoreo(graph, controls, allowedTime, startFinish):
+	numControls = len(controls)
+	while numControls >= 0:
+		perm = permutations(controls, numControls)
+		for p in perm:
+			p = list(p)
+			p.insert(0, startFinish)
+			p.insert(len(p), startFinish)
+			time = 0
+			visited = 1
+			for i in range(1, len(p)):
+				time += graph[p[i-1]][p[i]][0]
+				visited += 1
+			if time > allowedTime:
 					continue
-				max = option.index(startFinish)+1
-				if max <= bestPath[0]:
-					continue
-				option.insert(0, startFinish)
+			if visited == len(p):
+				print("visited: %d controls" % (visited-1))
+				print("time: %.0f minutes" % (time/60))
 				resultsMap = Image.open("terrain.png")
-				next = 1
-				start, totalTime, visited = 0, 0, 0
-				parentsList = []
-				while True:
-					result = findPath(pixelMap, elevationMap, option[start], option[next])
-					time = result[0]
-					parents = result[1]
-					parentsList.append((option[next], parents))
-					totalTime += time
-					start += 1
-					next += 1
-					visited += 1
-					if totalTime > allowedTime:
-						break
-					if option[start][0] == startFinish[0] and option[start][1] == startFinish[1]:  # we traveled back to the start
-						if visited > bestPath[0]:
-							bestPath = (visited, totalTime, parentsList)
-						break
-			#print("Best Path", bestPath)
-			for parentSet in bestPath[2]:
-				generatePath(resultsMap, parentSet[0], parentSet[1])
+				for i in range(1, len(p)):
+					generatePath(resultsMap, p[i], graph[p[i-1]][p[i]][1])
+				return 0
+		numControls -= 1
+
+
+def createGraph(startFinish, controls, pixelMap, elevationMap):
+	graph = {}
+	controls.insert(0, startFinish)
+	for control in controls:
+		neighbors = {}
+		for neighbor in controls:
+			if control[0] != neighbor[0] or control[1] != neighbor[1]:
+				time, parents = findPath(pixelMap, elevationMap, control, neighbor)
+				neighbors[neighbor] = (time, parents)
+		graph[control] = neighbors
+	return graph
 
 
 def generatePath(image, state, parents):
@@ -228,11 +235,11 @@ def addControls():
 	resultsMap = image.load()
 	with open('one.txt') as inputFile:
 		lineOne = inputFile.readline()
-		#lineOne = inputFile.readline()
+		lineOne = inputFile.readline()
 		for line in inputFile:
 			array = line.split()
 			resultsMap[int(array[0]), int(array[1])] = (0, 255, 255, 255)
 		image.save("results.png")
 
 main()
-#addControls()
+addControls()
