@@ -1,31 +1,17 @@
+import os
+
 __author__ = 'Jesse Vogel'
 __date__ = 'Sep 13th, 2016'
 
-###
-# Problem Environment
-# State space: dynamic - (x,y) pixel location, static - map data (terrain, elevation)
-# Init: starting point (x, y)
-# Goal: last point in sequence (w/ all other points visited in order)
-# Actions: move to neighboring pixel (increment/decrement x and/or y by 1)
-#
-# Heuristic Planning
-# - Average jogging speed: 1.7 - 2.7 m/s
-# - Average walking speed: 1.4 m/s
-#
-# Link about calculating velocity for graded paths
-# http://www.letsrun.com/forum/flat_read.php?thread=197366
-#
-# Good link about different heuristics
-# http://theory.stanford.edu/~amitp/GameProgramming/Heuristics.html
-###
-
 from PIL import Image
 from queue import PriorityQueue
-from math import sqrt
+from math import sqrt, atan2, pi
 from itertools import permutations
+from time import process_time
 
 
 def main():
+	startTime = process_time()
 	pixelMap = loadpixelmap("terrain.png")
 	elevationMap = loadelevationmap("mpp.txt")
 
@@ -59,11 +45,31 @@ def main():
 			graph = createGraph(startFinish, c, pixelMap, elevationMap)   # initialize graph
 
 			result = scoreo(graph, controls, allowedTime, startFinish)
+			time = result[0]
+			p = result[1]
+			visited = result[2]
+			print("visited: %d/%d" % (visited-2, len(controls)))
+			print("time: %.0f minutes" % (time/60))
+			try:
+				os.remove("directions.txt")
+			except OSError:
+				pass
+			resultsText = open("directions.txt", 'w')
+			resultsMap = Image.open("terrain.png")
+			controls.insert(0, startFinish)
+			buffer = []
+			for i in range(1, len(p)):
+				generatePath(resultsMap, p[i], graph[p[i-1]][p[i]][1])
+				buffer = writeDirections(resultsText, pixelMap, controls, p[i], graph[p[i-1]][p[i]][1], buffer)
+			#buffer.reverse()
+			resultsText.writelines(buffer)
+	#print("run time: %.0f seconds" % (process_time()-startTime))
 
 
 def scoreo(graph, controls, allowedTime, startFinish):
 	numControls = len(controls)
 	while numControls >= 0:
+		best = None
 		perm = permutations(controls, numControls)
 		for p in perm:
 			p = list(p)
@@ -77,12 +83,13 @@ def scoreo(graph, controls, allowedTime, startFinish):
 			if time > allowedTime:
 					continue
 			if visited == len(p):
-				print("visited: %d controls" % (visited-1))
-				print("time: %.0f minutes" % (time/60))
-				resultsMap = Image.open("terrain.png")
-				for i in range(1, len(p)):
-					generatePath(resultsMap, p[i], graph[p[i-1]][p[i]][1])
-				return 0
+				if best:
+					if time < best[0]:
+						best = (time, p, visited)
+				else:
+					best = (time, p, visited)
+		if best:
+			return best
 		numControls -= 1
 
 
@@ -108,6 +115,58 @@ def generatePath(image, state, parents):
 		state = parents[state]
 	image.save("results.png")
 
+
+def onPathOrRoad(pixelMap, x, y):
+	return pixelMap[x, y] == (0, 0, 0, 255) or pixelMap[x, y] == (71, 51, 3, 255)
+
+
+def angle(p1, p2):
+	dx = p2[0] - p1[0]
+	dy = (p2[1] - p1[1]) * -1
+	angle = atan2(1, 0) - atan2(dy, dx)
+	angle = angle * 360 / (2*pi)
+	if angle < 0:
+		angle += 360
+	return angle
+
+
+def writeDirections(file, pixelMap, controls, state, parents, buffer):
+	if controls.index(state) == 0:
+		return buffer
+	buffer.append("At state " + str(controls.index(state)) + "\n")
+	onPath = onPathOrRoad(pixelMap, state[0], state[1])
+	endPoint = state
+	state = parents[state]
+	startPoint = state
+	while True:
+		if onPath:
+			if not onPathOrRoad(pixelMap, state[0], state[1]):
+				#TODO moving from path to not path
+				dx = endPoint[0]-startPoint[0]
+				dy = endPoint[1]-startPoint[1]
+				dist = sqrt((dx*dx)+(dy*dy))
+				a = angle(startPoint, endPoint)
+				buffer.append("follow path at angle %.0f for %.0fm\n" % (a, dist))
+				onPath = False
+			else:
+				startPoint = state
+		else:
+			if onPathOrRoad(pixelMap, state[0], state[1]):
+				#TODO moving from not path to path
+				dx = endPoint[0]-startPoint[0]
+				dy = endPoint[1]-startPoint[1]
+				dist = sqrt((dx*dx)+(dy*dy))
+				a = angle(startPoint, endPoint)
+				buffer.append("go at angle %.0f for %.0fm\n" % (a, dist))
+				onPath = True
+			else:
+				startPoint = state
+
+		if parents[state] is None:
+			#buffer.append("At state " + str(controls.index(state)) + "\n")
+			break
+		state = parents[state]
+	return buffer
 
 def findPath(pixelMap, elevationMap, init, goal):
 	timeToNode = {}
@@ -164,6 +223,7 @@ def costFunction(pixelMap, elevationMap, timeToNode, curr, next, heading, goal):
 	nextElevation = elevationMap[curr[1]][next[0]-5]
 	rise = nextElevation - currElevation
 
+
 	# computer cost from curr to next
 	if heading == 'n' or heading == 's':
 		run = 7.55     # moving up
@@ -172,20 +232,23 @@ def costFunction(pixelMap, elevationMap, timeToNode, curr, next, heading, goal):
 	else:
 		run = 12.76    # moving diagonal
 
-	dist = sqrt((run*run)+(rise*rise))  # distance traveled taking into account the elevation change
+	grade = (rise/run)*100
+
+	#dist = sqrt((run*run)+(rise*rise))  # distance traveled taking into account the elevation change
+	dist = run
 
 	if currTerrain == (5, 73, 24, 255) or currTerrain == (0, 0, 255, 255) or currTerrain == (205, 0, 101, 255):
 		currSpeed = 0
 	elif currTerrain == (255, 192, 0, 255):
 		currSpeed = 2.0
 	elif currTerrain == (255, 255, 255, 255):
-		currSpeed = 2.7
+		currSpeed = 2.5
 	elif currTerrain == (2, 208, 60):
 		currSpeed = 2.0
 	elif currTerrain == (2, 136, 40, 255):
 		currSpeed = 1.0
 	elif currTerrain == (0, 0, 0, 255):
-		currSpeed = 2.5
+		currSpeed = 2.7
 	elif currTerrain == (71, 51, 3, 255):
 		currSpeed = 4.0
 	else:
@@ -195,13 +258,13 @@ def costFunction(pixelMap, elevationMap, timeToNode, curr, next, heading, goal):
 	elif nextTerrain == (255, 192, 0, 255):
 		nextSpeed = 2.0
 	elif nextTerrain == (255, 255, 255, 255):
-		nextSpeed = 2.7
+		nextSpeed = 2.5
 	elif nextTerrain == (2, 208, 60):
 		nextSpeed = 2.0
 	elif nextTerrain == (2, 136, 40, 255):
 		nextSpeed = 1.0
 	elif nextTerrain == (0, 0, 0, 255):
-		nextSpeed = 2.5
+		nextSpeed = 2.7
 	elif nextTerrain == (71, 51, 3, 255):
 		nextSpeed = 4.0
 	else:
@@ -210,15 +273,23 @@ def costFunction(pixelMap, elevationMap, timeToNode, curr, next, heading, goal):
 	if currSpeed == 0 or nextSpeed == 0:
 		time = float("inf")
 	else:
-		time = ((dist/2)/currSpeed) + ((dist/2)/nextSpeed)  # this method assumes moving from the center of one pixel to
-	timeToNode[next] = timeToNode[curr] + time              # the center of the next pixel
+		time = ((dist/2)/currSpeed) + ((dist/2)/nextSpeed)  # moving from the center of one pixel to the center of the next
+
+	if grade >= 0:
+		time += (dist*grade*0.0080529707)
+	else:
+		time -= (dist*grade*0.004970964566929)
+
+	timeToNode[next] = timeToNode[curr] + time
 	return timeToNode[next] + heuristic(next, goal)
 
 
 def heuristic(next, goal):
+	D = 1.8875
+	D2 = 3.19
 	dx = abs(next[0] - goal[0])
 	dy = abs(next[1] - goal[1])
-	return 1.14 * (dx + dy) + (1.93 - 2 * 1.14) * min(dx, dy)
+	return D * (dx + dy) + (D2 - 2 * D) * min(dx, dy)
 
 
 def loadpixelmap(filename):
