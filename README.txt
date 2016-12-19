@@ -12,7 +12,7 @@ location and a set of controls to visit. You may visit the controls in any order
 a given amount of time. A Score-O file will have a first line saying "ScoreO", a second line with the allowed time in 
 seconds, a third line with the location of the start/finish, and then additional lines representing the control locations.
 
-An example input file for classic and score-o is labeled classic_input.txt score_o_input.txt
+An example input file for classic and score-o is labeled classic_input.txt and score_o_input.txt
 
 To run the program:
 1. place program.py, terrain.png, and mpp.txt into an empty directory.
